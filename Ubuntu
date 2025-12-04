@@ -1,0 +1,121 @@
+import requests
+import os
+from urllib.parse import urlparse
+import hashlib  # For duplicate checking (challenge 3)
+
+def is_valid_image_url(url):
+    """
+    Basic check to ensure the URL points to a likely image file.
+    This is a precaution for downloading from unknown sources (challenge 2).
+    """
+    parsed = urlparse(url)
+    if not parsed.scheme or not parsed.netloc:
+        return False
+    # Check common image extensions
+    image_extensions = ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']
+    path_lower = parsed.path.lower()
+    return any(path_lower.endswith(ext) for ext in image_extensions)
+
+def get_image_hash(content):
+    """
+    Generate a hash of the image content to check for duplicates (challenge 3).
+    """
+    return hashlib.md5(content).hexdigest()
+
+def fetch_and_save_image(url, fetched_hashes, directory="Fetched_Images"):
+    """
+    Fetches an image from the URL, checks headers, handles errors, and saves it.
+    Prevents duplicates and includes safety precautions.
+    """
+    try:
+        # Precaution: Validate URL (challenge 2)
+        if not is_valid_image_url(url):
+            print(f"✗ Skipped: {url} does not appear to be a valid image URL.")
+            return False
+
+        # Fetch the image with a timeout for respect (avoid hanging connections)
+        response = requests.get(url, timeout=10, stream=True)  # stream=True for large files
+        response.raise_for_status()  # Raise for HTTP errors
+
+        # Challenge 4: Check important HTTP headers before saving
+        content_type = response.headers.get('Content-Type', '').lower()
+        if not content_type.startswith('image/'):
+            print(f"✗ Skipped: {url} does not have a valid image Content-Type ({content_type}).")
+            return False
+        
+        content_length = response.headers.get('Content-Length')
+        if content_length and int(content_length) > 10 * 1024 * 1024:  # Limit to 10MB for safety
+            print(f"✗ Skipped: {url} is too large ({content_length} bytes).")
+            return False
+
+        # Get content
+        content = response.content
+
+        # Challenge 3: Check for duplicates
+        image_hash = get_image_hash(content)
+        if image_hash in fetched_hashes:
+            print(f"✗ Skipped: {url} is a duplicate image.")
+            return False
+        fetched_hashes.add(image_hash)
+
+        # Extract filename from URL or generate one
+        parsed_url = urlparse(url)
+        filename = os.path.basename(parsed_url.path)
+        if not filename or '.' not in filename:
+            filename = f"downloaded_image_{len(fetched_hashes)}.jpg"  # Generate unique name
+
+        # Ensure unique filename if needed
+        filepath = os.path.join(directory, filename)
+        counter = 1
+        while os.path.exists(filepath):
+            name, ext = os.path.splitext(filename)
+            filepath = os.path.join(directory, f"{name}_{counter}{ext}")
+            counter += 1
+
+        # Save in binary mode
+        with open(filepath, 'wb') as f:
+            f.write(content)
+
+        print(f"✓ Successfully fetched: {filename}")
+        print(f"✓ Image saved to {filepath}")
+        return True
+
+    except requests.exceptions.Timeout:
+        print(f"✗ Timeout error for {url}: Connection took too long.")
+    except requests.exceptions.HTTPError as e:
+        print(f"✗ HTTP error for {url}: {e}")
+    except requests.exceptions.RequestException as e:
+        print(f"✗ Connection error for {url}: {e}")
+    except Exception as e:
+        print(f"✗ An error occurred for {url}: {e}")
+    return False
+
+def main():
+    print("Welcome to the Ubuntu Image Fetcher")
+    print("A tool for mindfully collecting images from the web")
+    print('"A person is a person through other persons." - Ubuntu philosophy\n')
+
+    # Challenge 1: Handle multiple URLs at once
+    urls_input = input("Please enter image URLs (separate multiple with commas): ")
+    urls = [url.strip() for url in urls_input.split(',') if url.strip()]
+
+    if not urls:
+        print("✗ No URLs provided.")
+        return
+
+    # Create directory if it doesn't exist
+    directory = "Fetched_Images"
+    os.makedirs(directory, exist_ok=True)
+
+    # Track fetched hashes for duplicate prevention (challenge 3)
+    fetched_hashes = set()
+
+    success_count = 0
+    for url in urls:
+        if fetch_and_save_image(url, fetched_hashes, directory):
+            success_count += 1
+
+    print(f"\nConnection strengthened. Community enriched. ({success_count} images fetched successfully.)")
+
+if __name__ == "__main__":
+    main()
